@@ -1,6 +1,12 @@
-#include <iostream>
-#include "scpu_testbench.cpp"
-
+//--------------------------------------
+//Project:  Simple CPU
+//Module:   SPCU Testbench - header file
+//Function: Provide input for CPU
+//Author:   Truong Cong Hoang Viet, Le Hoang Van, Nguyen Hung Quan
+//Page:     VLSI Technology
+//--------------------------------------
+//#include <iostream>
+#include "scpu_testbench.h"
 int sc_main (int argc, char* argv[]) {
   //1. Internal signal declaration
   sc_signal <bool> rst_n;

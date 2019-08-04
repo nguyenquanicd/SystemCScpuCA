@@ -2,33 +2,33 @@
 //Project:  Simple CPU
 //Module:   Decoder
 //Function: All declarations of decoder
-//Author:   Truong Cong Hoang Viet - Le Hoang Van
+//Author:   Truong Cong Hoang Viet - Le Hoang Van - Nguyen Hung Quan
 //Page:     VLSI Technology
 //--------------------------------------
-//
-//MEMORY
-//
 #include "systemc.h"
 #include "scpu_define.h"
+#include "tlm.h"
+#include "tlm_utils/simple_initiator_socket.h"
+#include "tlm_utils/simple_target_socket.h"
 
-SC_MODULE (scpu_decoder) {
+struct scpu_decoder: sc_module {
 	//Input
 	sc_in<bool> clk;
 	sc_in<bool> rst_n;
-	sc_in<sc_uint<8> > fetch_ir;
-	sc_in<sc_uint<8> > fetch_dr;
-	sc_in<sc_uint<8> > fetch_mem_dout;
-	sc_in<sc_uint<9> > ex_dout; //Note: 9 bits
+	sc_signal<sc_uint<8> > fetch_ir;
+	sc_signal<sc_uint<8> > fetch_dr;
+	sc_signal<sc_uint<8> > fetch_mem_dout;
+	sc_signal<sc_uint<9> > ex_dout; //Note: 9 bits
 	//Output
-    sc_out<bool>	  dc_load_pc;
-    sc_out<bool>	  dc_imm;
-    sc_out<bool>	  dc_mem_wr;
-    sc_out<bool>	  dc_load_dr;
-    sc_out<bool>	  dc_load_ir;
-    sc_out<sc_uint<2> >	    dc_addr_sel;
-    sc_out<sc_uint<9> >     dc_rs; //Note: 9 bits
-    sc_out<sc_uint<9> >     dc_rd; //Note: 9 bits
-    sc_out<sc_uint<2> >     dc_op;
+    sc_uint<1>  dc_load_pc; //Not bool
+    sc_uint<1>  dc_imm;
+    sc_uint<1>  dc_mem_wr;
+    sc_uint<1>  dc_load_dr;
+    sc_uint<1>  dc_load_ir;
+    sc_uint<2>   dc_addr_sel;
+    sc_uint<9>    dc_rs; //Note: 9 bits
+    sc_uint<9>    dc_rd; //Note: 9 bits
+    sc_uint<2>    dc_op;
     //Internal signals
     sc_signal<sc_uint<2> > ctrl_counter_next;
     sc_signal<sc_uint<9> > reg_in; //Note: 9 bits
@@ -45,6 +45,29 @@ SC_MODULE (scpu_decoder) {
     sc_signal<bool>  load_reg_en;
     sc_signal<bool>	  dc_load_dr_tmp;
     sc_signal<bool>   dc_load_ir_tmp;
+    //
+    //Sockets
+    //
+    //FETCH and DECODER
+    //
+    unsigned int fetch2dc_pkt_tmp;
+    sc_uint<24> fetch2dc_pkt;
+    // TLM-2 socket, defaults to 32-bits wide, base protocol
+    tlm_utils::simple_initiator_socket<scpu_decoder> dc2fetch_socket;
+    void DC2FETCH_SOCKET();
+    // TLM-2 socket, defaults to 32-bits wide, base protocol
+    tlm_utils::simple_target_socket<scpu_decoder> fetch2dc_socket;
+    
+    //
+    //EXECUTE and DECODER
+    //
+    unsigned int ex2dc_pkt_tmp;
+    sc_uint<9> ex2dc_pkt;
+    // TLM-2 socket, defaults to 32-bits wide, base protocol
+    tlm_utils::simple_initiator_socket<scpu_decoder> dc2ex_socket;
+    void DC2EX_SOCKET();
+    // TLM-2 socket, defaults to 32-bits wide, base protocol
+    tlm_utils::simple_target_socket<scpu_decoder> ex2dc_socket;
     //
     //Method declaration
     //
@@ -76,10 +99,31 @@ SC_MODULE (scpu_decoder) {
 	void DC_OP_COMP();
 	// decoder block 9: dc_mem_wr
 	void DC_MEM_WR_COMP();
+
+    //void DECODER_DATAIN();
     //
     //Constructor
     //
-	SC_CTOR(scpu_decoder) {
+
+	SC_CTOR(scpu_decoder) : dc2fetch_socket("dc2fetch_socket"), fetch2dc_socket("fetch2dc_socket"), ex2dc_socket("ex2dc_socket") {
+        //SC_METHOD (DECODER_DATAIN);
+        //  sensitive << dc_load_pc;
+        //  sensitive << dc_imm;
+        //  sensitive << dc_mem_wr;
+        //  sensitive << dc_load_dr;
+        //  sensitive << dc_load_ir;
+        //  sensitive << dc_addr_sel;
+        //  sensitive << dc_rs;
+        //  sensitive << dc_rd;
+        //  sensitive << dc_op;
+        //Sockets
+  	    SC_THREAD (DC2FETCH_SOCKET);
+  	    SC_THREAD (DC2EX_SOCKET);
+  	    // Register callback for incoming b_transport interface method call
+        fetch2dc_socket.register_b_transport(this, &scpu_decoder::fetch2dc_transport);
+        ex2dc_socket.register_b_transport(this, &scpu_decoder::ex2dc_transport);
+        //
+  	    //
 		SC_METHOD(RS_SEL);
 		  sensitive << fetch_ir;
 		  sensitive << reg0;
@@ -128,12 +172,12 @@ SC_MODULE (scpu_decoder) {
           sensitive << clk.pos();
         //
         SC_METHOD( DC_LOAD_PC_COMP );
-          sensitive << dc_load_ir;
+          sensitive << dc_load_ir_tmp;
           sensitive << dc_load_dr_tmp;
         // decoder block 3: dc_imm
         SC_METHOD( JUMP_EN_COMP );
           sensitive << fetch_ir;
-          sensitive << dc_rd;
+          sensitive << dc_rd_reg;
         //
         SC_METHOD( DC_IMM_COMP );
           sensitive << jump_en;
@@ -163,4 +207,42 @@ SC_MODULE (scpu_decoder) {
           sensitive << fetch_ir;
           sensitive << ctrl_counter;
 	}
+  //From FETCH
+  virtual void fetch2dc_transport (tlm::tlm_generic_payload& fetch2dc_trans, sc_time &delay) {
+    tlm::tlm_command dc_cmd = fetch2dc_trans.get_command();
+    unsigned char*   dc_ptr = fetch2dc_trans.get_data_ptr();
+    unsigned int     dc_len = fetch2dc_trans.get_data_length();
+    unsigned char*   dc_byt = fetch2dc_trans.get_byte_enable_ptr();
+    unsigned int     dc_wid = fetch2dc_trans.get_streaming_width();
+    
+    if (dc_cmd != tlm::TLM_WRITE_COMMAND)
+      SC_REPORT_ERROR("TLM-2", "Target only support TLM_WRITE_COMMAND for the transaction from FETCH to DECODER");
+    //
+	memcpy (&fetch2dc_pkt_tmp, dc_ptr, dc_len);
+    fetch2dc_pkt = fetch2dc_pkt_tmp;
+	//
+	fetch_ir   = fetch2dc_pkt.range(23,16);
+	fetch_dr   = fetch2dc_pkt.range(15,8);
+	fetch_mem_dout  = fetch2dc_pkt.range(7,0);
+    // Set response status to indicate successful completion
+    fetch2dc_trans.set_response_status( tlm::TLM_OK_RESPONSE );
+  }
+  //From EXECUTE
+  virtual void ex2dc_transport (tlm::tlm_generic_payload& ex2dc_trans, sc_time &delay) {
+    tlm::tlm_command dc_cmd = ex2dc_trans.get_command();
+    unsigned char*   dc_ptr = ex2dc_trans.get_data_ptr();
+    unsigned int     dc_len = ex2dc_trans.get_data_length();
+    unsigned char*   dc_byt = ex2dc_trans.get_byte_enable_ptr();
+    unsigned int     dc_wid = ex2dc_trans.get_streaming_width();
+    
+    if (dc_cmd != tlm::TLM_WRITE_COMMAND)
+      SC_REPORT_ERROR("TLM-2", "Target only support TLM_WRITE_COMMAND for the transaction from EXECUTE to DECODER");
+    //
+	memcpy (&ex2dc_pkt_tmp, dc_ptr, dc_len);
+    ex2dc_pkt = ex2dc_pkt_tmp;
+	//
+	ex_dout   = ex2dc_pkt.range(8,0);
+    // Set response status to indicate successful completion
+    ex2dc_trans.set_response_status( tlm::TLM_OK_RESPONSE );
+  }
 };
