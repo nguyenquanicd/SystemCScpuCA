@@ -1,3 +1,10 @@
+//--------------------------------------
+//Project:  Simple CPU
+//Module:   SPCU Testbench - header file
+//Function: Provide input for CPU
+//Author:   Truong Cong Hoang Viet, Le Hoang Van, Nguyen Hung Quan
+//Page:     VLSI Technology
+//--------------------------------------
 //START
 sc_trace_file *scpu_waveform =  sc_create_vcd_trace_file("scpu_waveform");
   if(scpu_waveform==NULL) cout<<"1. Cannot create the waveform file"<< endl;
