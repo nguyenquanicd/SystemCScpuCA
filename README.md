@@ -1,5 +1,5 @@
 # SystemCScpuCA
-This is the example of Cycle Accurate (CA) model (can synthesize).
+This is the example of TLM tagged socket.
 It is the Simple CPU (SCPU) is described in SystemC language.
 
 //--------------------------------------
@@ -14,9 +14,9 @@ It is the Simple CPU (SCPU) is described in SystemC language.
 
 Language: System C
 
-Feature: Can synthesize (SystemC code to RTL code)
+Feature: Use tagged socket to connect between two modules
 
-Tool: Vivado HLS 2017.4
+Tool: gcc/g+++
 
 //--------------------------------------
 
@@ -24,15 +24,8 @@ Tool: Vivado HLS 2017.4
 
 //--------------------------------------
 
-http://nguyenquanicd.blogspot.com/search/label/Project1?&max-results=5
+http://nguyenquanicd.blogspot.com/2019/07/systemctlm-bai-3-tagged-simple-socket.html
 
-//--------------------------------------
-
-//HOW TO Synthesize?
-
-//--------------------------------------
-
-http://nguyenquanicd.blogspot.com/2019/05/systemchigh-level-designbai-7-tong-hop.html
 
 //--------------------------------------
 
