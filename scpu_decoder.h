@@ -2,33 +2,33 @@
 //Project:  Simple CPU
 //Module:   Decoder
 //Function: All declarations of decoder
-//Author:   Truong Cong Hoang Viet - Le Hoang Van
+//Author:   Truong Cong Hoang Viet - Le Hoang Van - Nguyen Hung Quan
 //Page:     VLSI Technology
 //--------------------------------------
-//
-//MEMORY
-//
 #include "systemc.h"
 #include "scpu_define.h"
+#include "tlm.h"
+#include "tlm_utils/multi_passthrough_initiator_socket.h"
+#include "tlm_utils/multi_passthrough_target_socket.h"
 
-SC_MODULE (scpu_decoder) {
+struct scpu_decoder: sc_module {
 	//Input
 	sc_in<bool> clk;
 	sc_in<bool> rst_n;
-	sc_in<sc_uint<8> > fetch_ir;
-	sc_in<sc_uint<8> > fetch_dr;
-	sc_in<sc_uint<8> > fetch_mem_dout;
-	sc_in<sc_uint<9> > ex_dout; //Note: 9 bits
+	sc_signal<sc_uint<8> > fetch_ir;
+	sc_signal<sc_uint<8> > fetch_dr;
+	sc_signal<sc_uint<8> > fetch_mem_dout;
+	sc_signal<sc_uint<9> > ex_dout; //Note: 9 bits
 	//Output
-    sc_out<bool>	  dc_load_pc;
-    sc_out<bool>	  dc_imm;
-    sc_out<bool>	  dc_mem_wr;
-    sc_out<bool>	  dc_load_dr;
-    sc_out<bool>	  dc_load_ir;
-    sc_out<sc_uint<2> >	    dc_addr_sel;
-    sc_out<sc_uint<9> >     dc_rs; //Note: 9 bits
-    sc_out<sc_uint<9> >     dc_rd; //Note: 9 bits
-    sc_out<sc_uint<2> >     dc_op;
+    sc_uint<1>  dc_load_pc; //Not bool
+    sc_uint<1>  dc_imm;
+    sc_uint<1>  dc_mem_wr;
+    sc_uint<1>  dc_load_dr;
+    sc_uint<1>  dc_load_ir;
+    sc_uint<2>   dc_addr_sel;
+    sc_uint<9>    dc_rs; //Note: 9 bits
+    sc_uint<9>    dc_rd; //Note: 9 bits
+    sc_uint<2>    dc_op;
     //Internal signals
     sc_signal<sc_uint<2> > ctrl_counter_next;
     sc_signal<sc_uint<9> > reg_in; //Note: 9 bits
@@ -45,6 +45,21 @@ SC_MODULE (scpu_decoder) {
     sc_signal<bool>  load_reg_en;
     sc_signal<bool>	  dc_load_dr_tmp;
     sc_signal<bool>   dc_load_ir_tmp;
+    //
+    //Sockets
+    //
+    //FETCH and DECODER
+    //
+    unsigned int fetch2dc_pkt_tmp;
+    sc_uint<24> fetch2dc_pkt;
+    tlm_utils::multi_passthrough_initiator_socket<scpu_decoder> dc_output_socket;
+    void DC_OUTPUT_SOCKET();
+    //
+    //EXECUTE and DECODER
+    //
+    unsigned int ex2dc_pkt_tmp;
+    sc_uint<9> ex2dc_pkt;
+    tlm_utils::multi_passthrough_target_socket<scpu_decoder> dc_input_socket;
     //
     //Method declaration
     //
@@ -72,14 +87,23 @@ SC_MODULE (scpu_decoder) {
 	// decoder block 7: dc_load_ir
 	void DC_LOAD_IR_COMP();
 	void DC_LOAD_IR_OUTPUT();
-	// decoder block 8: dc_op
+	// decoder block 8: dc_o
 	void DC_OP_COMP();
 	// decoder block 9: dc_mem_wr
 	void DC_MEM_WR_COMP();
+
+    //void DECODER_DATAIN();
     //
     //Constructor
     //
-	SC_CTOR(scpu_decoder) {
+
+	SC_CTOR(scpu_decoder) : dc_input_socket("dc_input_socket") {
+        //Sockets
+  	    SC_THREAD (DC_OUTPUT_SOCKET);
+  	    // Register callback for incoming b_transport interface method call
+        dc_input_socket.register_b_transport(this, &scpu_decoder::common_transport);
+        //
+  	    //
 		SC_METHOD(RS_SEL);
 		  sensitive << fetch_ir;
 		  sensitive << reg0;
@@ -128,12 +152,12 @@ SC_MODULE (scpu_decoder) {
           sensitive << clk.pos();
         //
         SC_METHOD( DC_LOAD_PC_COMP );
-          sensitive << dc_load_ir;
+          sensitive << dc_load_ir_tmp;
           sensitive << dc_load_dr_tmp;
         // decoder block 3: dc_imm
         SC_METHOD( JUMP_EN_COMP );
           sensitive << fetch_ir;
-          sensitive << dc_rd;
+          sensitive << dc_rd_reg;
         //
         SC_METHOD( DC_IMM_COMP );
           sensitive << jump_en;
@@ -163,4 +187,33 @@ SC_MODULE (scpu_decoder) {
           sensitive << fetch_ir;
           sensitive << ctrl_counter;
 	}
+  //Common b_transport callback
+  virtual void common_transport (int id, tlm::tlm_generic_payload& common_trans, sc_time &delay) {
+    tlm::tlm_command dc_cmd = common_trans.get_command();
+    unsigned char*   dc_ptr = common_trans.get_data_ptr();
+    unsigned int     dc_len = common_trans.get_data_length();
+    unsigned char*   dc_byt = common_trans.get_byte_enable_ptr();
+    unsigned int     dc_wid = common_trans.get_streaming_width();
+    unsigned int     dc_addr= common_trans.get_address();
+    
+    if (dc_cmd != tlm::TLM_WRITE_COMMAND)
+      SC_REPORT_ERROR("TLM-2", "Target only support TLM_WRITE_COMMAND for the transaction from FETCH to DECODER");
+    //
+    if (dc_addr == 1) { //Get data from FETCH
+	  memcpy (&fetch2dc_pkt_tmp, dc_ptr, dc_len);
+      fetch2dc_pkt = fetch2dc_pkt_tmp;
+	  //
+	  fetch_ir   = fetch2dc_pkt.range(23,16);
+	  fetch_dr   = fetch2dc_pkt.range(15,8);
+	  fetch_mem_dout  = fetch2dc_pkt.range(7,0);
+    }
+    else { //Get data from EXECUTE when id=2
+	  memcpy (&ex2dc_pkt_tmp, dc_ptr, dc_len);
+      ex2dc_pkt = ex2dc_pkt_tmp;
+	  //
+	  ex_dout   = ex2dc_pkt.range(8,0);
+    }
+    // Set response status to indicate successful completion
+    common_trans.set_response_status( tlm::TLM_OK_RESPONSE );
+  }
 };

@@ -5,9 +5,54 @@
 //Author:  Truong Cong Hoang Viet - Le Hoang Van
 //Page:    VLSI Technology
 //--------------------------------------
-
 #include "scpu_decoder.h"
-
+//
+//DC_OUTPUT_SOCKET
+//
+void scpu_decoder::DC_OUTPUT_SOCKET() {
+	//
+    unsigned int decoder_data_tmp;
+	sc_uint<27> decoder_data;
+    // TLM-2 generic payload transaction, reused across calls to b_transport
+    // Create the transaction
+    tlm::tlm_generic_payload* dc_output_trans = new tlm::tlm_generic_payload;
+    sc_time wire_delay = sc_time(0, SC_PS);
+    sc_time trans_delay = sc_time(10, SC_PS);
+    //Forever run
+    while (1) {
+      //Set the command attribute
+      //TLM_WRITE_COMMAND is set because this packet only output data from DECODER
+      tlm::tlm_command dc_cmd = tlm::TLM_WRITE_COMMAND;
+      //Create the write data which is sent from DECODER
+      //They are all outputs of DECODER
+      decoder_data = (dc_load_pc, dc_imm, dc_mem_wr, dc_load_dr, dc_load_ir, dc_addr_sel, dc_rs, dc_rd, dc_op);
+      decoder_data_tmp = decoder_data;
+      // Set up the attribute of a payload
+      // Set the command type - WRITE
+      dc_output_trans->set_command( dc_cmd );
+      // Data pointer
+      dc_output_trans->set_data_ptr( reinterpret_cast<unsigned char*>(&decoder_data_tmp) );
+      // Number of data bytes. It is equal or larger than the number of transfered bits 
+      dc_output_trans->set_data_length( 4 ); //4 bytes which can cover 27 bits
+      dc_output_trans->set_streaming_width( 4 ); // = the value of set_data_length to indicate "no streaming"
+      dc_output_trans->set_byte_enable_ptr( 0 ); // 0 indicates "Do not use the byte enable to control the transaction"
+      dc_output_trans->set_dmi_allowed( false ); // Mandatory initial value to clear DMI hint
+      dc_output_trans->set_response_status( tlm::TLM_INCOMPLETE_RESPONSE ); // Mandatory initial value
+      for (unsigned int i = 0; i < 2; i++) {
+        (dc_output_socket[i])->b_transport( *dc_output_trans, wire_delay );  // Blocking transport call
+        //Check response status and delay
+        if ( dc_output_trans->is_response_error() ) {
+          cout << "---------------------------" << endl;
+          cout << "--- Socket num: " << i << endl;
+          cout << "   " << 0 << "- from FETCH" << endl;
+          cout << "   " << 1 << "- from EXECUTE" << endl;
+          SC_REPORT_ERROR("[DECODER]", "Response error from b_transport");
+        }  
+      }
+      // Realize the delay annotated onto the transport call
+      wait(trans_delay);
+    }
+}
 //Source register
 void scpu_decoder::RS_SEL() {
 	if (fetch_ir.read().range(1,0) == 0x0) {
@@ -24,7 +69,7 @@ void scpu_decoder::RS_SEL() {
 	}
 }
 void scpu_decoder::RS_OUTPUT() {
-	dc_rs.write(dc_rs_reg);
+	dc_rs = dc_rs_reg;
 }
 //Destination register
 void scpu_decoder::RD_SEL() {
@@ -43,7 +88,7 @@ void scpu_decoder::RD_SEL() {
 	}
 }
 void scpu_decoder::RD_OUTPUT() {
-	dc_rd.write(dc_rd_reg.read());
+	dc_rd = dc_rd_reg.read();
 }
 //
 void scpu_decoder::REG_WE() {
@@ -80,7 +125,7 @@ void scpu_decoder::REG_WE_SEL() {
 	else if (fetch_ir.read().range(3,2) == 3) {
 		load_reg_tmp[3] = load_reg_en;
 	}
-	load_reg.write(load_reg_tmp);
+	load_reg = load_reg_tmp;
 }
 
 void scpu_decoder::REG_IN_SEL () {
@@ -249,3 +294,7 @@ void scpu_decoder::DC_MEM_WR_COMP() {
       break;
   }
 }
+
+  
+ 
+  
